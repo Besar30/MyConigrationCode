@@ -1,0 +1,43 @@
+  private List<LinkDto> CreateLinksForHabits(HabitQueryParameters Parameters,bool hasNextPage, bool hasPreviousPage)
+  {
+      List<LinkDto> links = [
+          linkService.Create(nameof(GetHabits),"self",HttpMethods.Get,new { Parameters.page,Parameters.pageSize,
+            fildes = Parameters.Fields,
+            q = Parameters.Search,
+            Parameters.sort,
+            type = Parameters.habitType,
+             status = Parameters.habitStatus
+          }),
+           linkService.Create(nameof(CreateHabit),"create",HttpMethods.Post)
+          ];
+      if (hasNextPage)
+      {
+          links.Add(
+              linkService.Create(nameof(GetHabits), "Next-page", HttpMethods.Get, new
+              {
+                 page= Parameters.page+1,
+                  Parameters.pageSize,
+                  fildes = Parameters.Fields,
+                  q = Parameters.Search,
+                  Parameters.sort,
+                  type = Parameters.habitType,
+                  status = Parameters.habitStatus
+              }));
+      }
+
+      if (hasPreviousPage)
+      {
+          links.Add(
+              linkService.Create(nameof(GetHabits), "Previous-page", HttpMethods.Get, new
+              {
+                  page = Parameters.page - 1,
+                  Parameters.pageSize,
+                  fildes = Parameters.Fields,
+                  q = Parameters.Search,
+                  Parameters.sort,
+                  type = Parameters.habitType,
+                  status = Parameters.habitStatus
+              }));
+      }
+      return links;
+  }

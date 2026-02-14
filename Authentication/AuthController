@@ -1,0 +1,113 @@
+using System.Collections.Immutable;
+using DevHabit.Api.Database;
+using DevHabit.Api.DTOs.Auth;
+using DevHabit.Api.DTOs.Users;
+using DevHabit.Api.Entities;
+using DevHabit.Api.Services;
+using DevHabit.Api.Setting;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
+using Microsoft.Extensions.Options;
+
+namespace DevHabit.Api.Controllers;
+[ApiController]
+[Route("auth")]
+[AllowAnonymous]
+public class AuthController(UserManager<IdentityUser> userManager,
+                            ApplicationDbContext context
+                           , ApplicationIdentityDbContext identityDbContext
+                           ,TokenProvider tokenProvider,
+                           IOptions<JwtAuthOptions> options):ControllerBase
+{
+    private readonly JwtAuthOptions _jwtAuthOptions=options.Value;
+    [HttpPost("register")]
+    public async Task<IActionResult> Register(RegisterUserDto registerUserDto)
+    {
+        using IDbContextTransaction transaction =await identityDbContext.Database.BeginTransactionAsync();
+        context.Database.SetDbConnection(identityDbContext.Database.GetDbConnection());
+        await context.Database.UseTransactionAsync(transaction.GetDbTransaction());
+
+        var identityUser = new IdentityUser
+        {
+            Email=registerUserDto.Email,
+            UserName=registerUserDto.Email
+        };
+        IdentityResult identityResult =await userManager.CreateAsync(identityUser,registerUserDto.Password);
+        if (!identityResult.Succeeded)
+        {
+            var extentions = new Dictionary<string, object?>
+            {
+                {"erros",identityResult.Errors.ToDictionary(e=>e.Code,e=>e.Description) }
+            };
+            return Problem(
+                detail:"Unable to register user , please try again"
+                ,statusCode:StatusCodes.Status400BadRequest,
+                extensions: extentions);
+        }
+        User user= registerUserDto.ToEntity();
+        user.IdentityId = identityUser.Id;
+        context.Users.Add(user);
+        await context.SaveChangesAsync();
+        var tokenRequest = new TokenRequest(identityUser.Id, identityUser.Email);
+        var accessTokens = tokenProvider.Create(tokenRequest);
+        var refreshToken = new RefreshToken
+        {
+            Id = Guid.CreateVersion7(),
+            Token = accessTokens.RefreshToken,
+            UserId = identityUser.Id,
+            ExpiresAtUtc = DateTime.UtcNow.AddDays(_jwtAuthOptions.RefreshTokenExpirationDays)
+        };
+        identityDbContext.refreshTokens.Add(refreshToken);
+        await identityDbContext.SaveChangesAsync();
+        await transaction.CommitAsync();
+       
+        return Ok(accessTokens); 
+    }
+    [HttpPost("login")]
+    public async Task<ActionResult<AccessTokensDto>> Login(LoginUserDto loginUserDto) 
+    {
+        var identityUser=await userManager.FindByEmailAsync(loginUserDto.Email);
+        if(identityUser is  null || !await userManager.CheckPasswordAsync(identityUser, loginUserDto.Password)){
+            return Problem(
+                detail:"Invalid Cradintioal",
+                statusCode:StatusCodes.Status400BadRequest);
+        }
+        var tokenRequest= new TokenRequest(identityUser.Id, loginUserDto.Email);
+        var AccessTokens= tokenProvider.Create(tokenRequest);
+        var refreshToken = new RefreshToken
+        {
+            Id = Guid.CreateVersion7(),
+            UserId = identityUser.Id,
+            Token = AccessTokens.RefreshToken,
+            ExpiresAtUtc = DateTime.UtcNow.AddDays(_jwtAuthOptions.RefreshTokenExpirationDays)
+        };
+        identityDbContext.refreshTokens.Add(refreshToken);
+        await identityDbContext.SaveChangesAsync();
+        return Ok(AccessTokens);
+    }
+
+    [HttpPost("refresh")]
+    public async Task<IActionResult> Refresh(RefreshTokenDto refreshTokenDto)
+    {
+        RefreshToken? refreshToken = await identityDbContext.refreshTokens
+                                         .Include(x => x.user)
+                                         .FirstOrDefaultAsync(x => x.Token == refreshTokenDto.RefreshToken);
+        if (refreshToken == null)
+        {
+            return Unauthorized();
+        }
+        if (refreshToken.ExpiresAtUtc < DateTime.UtcNow)
+        {
+            return Unauthorized();
+        }
+        var tokenRequest = new TokenRequest(refreshToken.UserId, refreshToken.user.Email!);
+        var accessTokens = tokenProvider.Create(tokenRequest);
+        refreshToken.Token = accessTokens.RefreshToken;
+        refreshToken.ExpiresAtUtc = DateTime.UtcNow.AddDays(_jwtAuthOptions.RefreshTokenExpirationDays);
+        await identityDbContext.SaveChangesAsync();
+        return Ok(accessTokens);
+    }
+}

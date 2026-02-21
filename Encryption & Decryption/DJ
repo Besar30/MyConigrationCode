@@ -1,0 +1,2 @@
+  builder.Services.Configure<EncryptionOptions>(builder.Configuration.GetSection("Encryption"));
+  builder.Services.AddTransient<EncryptionServices>();

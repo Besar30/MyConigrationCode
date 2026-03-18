@@ -1,0 +1,45 @@
+  public static WebApplicationBuilder AddRateLimiting(this WebApplicationBuilder builder)
+  {
+      builder.Services.AddRateLimiter(options => {
+          options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+          options.OnRejected = async (context, token) =>
+          {
+              if (context.Lease.TryGetMetadata(MetadataName.RetryAfter, out TimeSpan retryAfter))
+              {
+                  context.HttpContext.Response.Headers.RetryAfter = $"{retryAfter.TotalSeconds}";
+                  ProblemDetailsFactory problemDetailsFactory = context.HttpContext.RequestServices
+                    .GetRequiredService<ProblemDetailsFactory>();
+                  Microsoft.AspNetCore.Mvc.ProblemDetails problemDetails = problemDetailsFactory
+                     .CreateProblemDetails(context.HttpContext,
+                      StatusCodes.Status429TooManyRequests, "Too Many Requests",
+                      detail: $"Too many requests. Please try again after {retryAfter.TotalSeconds} seconds.");
+                  await context.HttpContext.Response.WriteAsJsonAsync(problemDetails, cancellationToken: default);
+              }
+          };
+          options.AddPolicy("default", httpcontext =>
+          {
+              string userName = httpcontext.User.Identity?.Name ?? string.Empty;
+              if (!string.IsNullOrEmpty(userName))
+              {
+                  return RateLimitPartition.GetTokenBucketLimiter(
+                      userName,
+                      _ => new TokenBucketRateLimiterOptions
+                      {
+                          TokenLimit = 100,
+                          QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                          QueueLimit = 5,
+                          ReplenishmentPeriod = TimeSpan.FromMinutes(1),
+                          TokensPerPeriod = 25
+                      });
+              }
+              return RateLimitPartition.GetFixedWindowLimiter("anonymous",
+                  _ => new FixedWindowRateLimiterOptions
+                  {
+                      PermitLimit = 6,
+                      Window = TimeSpan.FromMinutes(1)
+                  });
+          });
+      });
+
+      return builder;
+  }

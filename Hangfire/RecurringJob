@@ -1,0 +1,5 @@
+var scopeFactory = app. Services. GetRequiredService<IServiceScopeFactory>O;
+using var scope = scopeFactory. CreateScope();
+var notificationService = scope. ServiceProvider.GetRequiredService<INotificationService>();
+
+RecurringJob. AddOrUpdate("SendNewPollsNotification",() => notificationService. SendNewPollsNotification( pollId: null), Cron. Daily);

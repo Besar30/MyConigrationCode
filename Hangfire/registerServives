@@ -1,0 +1,11 @@
+public void ConfigureServices(IServiceCollection services)
+
+services.AddHangfire(configuration => configuration
+.SetDataCompatibilityLevel(CompatibilityLevel.Version_180)
+.UseSimpleAssemblyNameTypeSerializer()
+.UseRecommendedSerializerSettings()
+T.UseSq1ServerStorage(Configuration.GetConnectionString("HangfireConnection")));
+
+// Add the processing server as IHostedService
+services.AddHangfireServer();
+

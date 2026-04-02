@@ -1,0 +1,34 @@
+ var Domain = "https://localhost:7014/";
+ //strip logic
+ var options = new Stripe.Checkout.SessionCreateOptions
+ {
+     SuccessUrl = Domain+ $"Customer/Cart/OrderConfirmation/{shoppinCartVM.OrderHeader.Id}",
+     CancelUrl= Domain+"Customer/Cart/Index",
+     LineItems = new List<Stripe.Checkout.SessionLineItemOptions>(),
+     Mode = "payment",
+ };
+ foreach(var item in shoppinCartVM.ListCart)
+ {
+     var sessionLineItem = new SessionLineItemOptions
+     {
+         PriceData = new SessionLineItemPriceDataOptions
+         {
+             UnitAmount = (long)(item.product.Price * 100),
+             Currency = "usd",
+             ProductData = new SessionLineItemPriceDataProductDataOptions
+             {
+                 Name = item.product.Title
+             }
+
+         },
+         Quantity = item.Count
+     };
+     options.LineItems.Add(sessionLineItem);
+     
+ }
+ var service = new Stripe.Checkout.SessionService();
+ Stripe.Checkout.Session session = service.Create(options);
+ _unitOfWork.OrderHeaderRepository.UpdateStripePaymenrID(shoppinCartVM.OrderHeader.Id, session.Id, session.PaymentIntentId);
+ _unitOfWork.save();
+ Response.Headers.Add("Location", session.Url);
+ return new StatusCodeResult(303);
